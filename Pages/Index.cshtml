@@ -1,0 +1,17 @@
+﻿@page
+@model IndexModel
+@{
+    ViewData["Title"] = "Home page";
+}
+
+<h3>Reciver</h3>
+<div id="receiver-wrapper">
+</div>
+
+
+<h3>Controller</h3>
+<button class="btn btn-primary">Request Control</button>
+<div id="controller-wrapper">
+</div>
+<script src="~/js/signalr/dist/browser/signalr.js"></script>
+<script type="module" src="~/js/site.js" asp-append-version="true"></script>

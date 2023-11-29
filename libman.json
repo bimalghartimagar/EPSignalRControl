@@ -1,0 +1,20 @@
+{
+  "version": "1.0",
+  "defaultProvider": "unpkg",
+  "libraries": [
+    {
+      "library": "@microsoft/signalr@latest",
+      "destination": "wwwroot/js/signalr",
+      "files": [
+        "dist/browser/signalr.js"
+      ]
+    },
+    {
+      "library": "three@0.158.0",
+      "destination": "wwwroot/js/threejs",
+      "files": [
+        "build/three.min.js"
+      ]
+    }
+  ]
+}
