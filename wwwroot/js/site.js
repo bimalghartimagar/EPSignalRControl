@@ -1,6 +1,15 @@
 ﻿import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
+let controlRequested = false;
+let controlGranted = false;
+
+const requestCtrlBtn = document.getElementById('requestCtrlBtn')
+requestCtrlBtn.disabled = true;
+requestCtrlBtn.innerText = "Request Control";
+
+const messageCtrl = document.getElementById('message')
+
 
 // Connect to the SensorDataHub (your SignalR hub for sensor data)
 const controlHubConnection = new signalR.HubConnectionBuilder()
@@ -17,6 +26,50 @@ var canvasItems = [
     }
 ]
 
+requestCtrlBtn.addEventListener('click', () => {
+    let action = 'RequestControl';
+    if (controlGranted) {
+        action = 'ReleaseControl';
+    }
+    controlHubConnection.invoke(action).catch(function (err) {
+        return console.error(err.toString());
+    });
+})
+
+
+controlHubConnection.on("ControlGranted", function () {
+    controlGranted = true;
+    controlRequested = false;
+    requestCtrlBtn.classList.remove(['btn-primary','btn-warning']);
+    requestCtrlBtn.classList.add('btn-success');
+    requestCtrlBtn.innerText = "Release Control";
+});
+
+
+controlHubConnection.on("ControlQueued", function () {
+    controlRequested = true;
+    controlGranted = false;
+    requestCtrlBtn.disabled = true;
+    requestCtrlBtn.classList.remove('btn-primary');
+    requestCtrlBtn.classList.add('btn-warning');
+    requestCtrlBtn.innerText = "Waiting in Queue";
+});
+
+controlHubConnection.on("ControlReleased", function () {
+    controlRequested = false;
+    controlGranted = false;
+    requestCtrlBtn.innerText = "Request Control";
+    requestCtrlBtn.classList.remove(['btn-success','btn-warning']);
+    requestCtrlBtn.classList.add('btn-primary');
+    requestCtrlBtn.disabled = false;
+    messageCtrl.innerText = '';
+    messageCtrl.classList.add('d-none');
+});
+
+controlHubConnection.on("ControlRemaining", function (seconds) {
+    messageCtrl.classList.remove('d-none');
+    messageCtrl.innerText = `Control Granted: ${seconds} seconds remaining`;
+});
 
 
 
@@ -125,6 +178,7 @@ controlHubConnection.on("ReceiveSensorData", function (sensorData) {
 // Start the SignalR connection
 controlHubConnection.start().then(function () {
     console.log("Connected to SensorDataHub");
+    requestCtrlBtn.disabled = false;
 }).catch(function (err) {
     console.error("Error connecting to SensorDataHub: " + err);
 });
