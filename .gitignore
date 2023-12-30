@@ -41,3 +41,9 @@ obj/Debug/net8.0/staticwebassets/msbuild.build.EPSignalRControl.props
 obj/Debug/net8.0/staticwebassets/msbuild.buildMultiTargeting.EPSignalRControl.props
 obj/Debug/net8.0/staticwebassets/msbuild.buildTransitive.EPSignalRControl.props
 obj/Debug/net8.0/staticwebassets/msbuild.EPSignalRControl.Microsoft.AspNetCore.StaticWebAssets.props
+/.vscode
+/.vs
+/.config
+/bin/Release/net8.0
+/obj
+/Properties/PublishProfiles
