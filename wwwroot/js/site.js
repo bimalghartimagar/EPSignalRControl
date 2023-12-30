@@ -1,8 +1,9 @@
 ﻿import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 let controlRequested = false;
 let controlGranted = false;
+let destroyController = false;
 
 const requestCtrlBtn = document.getElementById('requestCtrlBtn')
 requestCtrlBtn.disabled = true;
@@ -10,21 +11,12 @@ requestCtrlBtn.innerText = "Request Control";
 
 const messageCtrl = document.getElementById('message')
 
-
 // Connect to the SensorDataHub (your SignalR hub for sensor data)
 const controlHubConnection = new signalR.HubConnectionBuilder()
     .withUrl("/controlhub") // Replace with the actual URL of your SensorDataHub
     .build();
 
 
-var canvasItems = [
-    {
-        id: "receiver-wrapper"
-    },
-    {
-        id: "controller-wrapper"
-    }
-]
 
 requestCtrlBtn.addEventListener('click', () => {
     let action = 'RequestControl';
@@ -36,15 +28,15 @@ requestCtrlBtn.addEventListener('click', () => {
     });
 })
 
-
 controlHubConnection.on("ControlGranted", function () {
     controlGranted = true;
     controlRequested = false;
-    requestCtrlBtn.classList.remove(['btn-primary','btn-warning']);
+    requestCtrlBtn.disabled = false;
+    requestCtrlBtn.classList.remove(...['btn-primary', 'btn-warning']);
     requestCtrlBtn.classList.add('btn-success');
     requestCtrlBtn.innerText = "Release Control";
+    destroyController = createController();
 });
-
 
 controlHubConnection.on("ControlQueued", function () {
     controlRequested = true;
@@ -58,12 +50,17 @@ controlHubConnection.on("ControlQueued", function () {
 controlHubConnection.on("ControlReleased", function () {
     controlRequested = false;
     controlGranted = false;
-    requestCtrlBtn.innerText = "Request Control";
-    requestCtrlBtn.classList.remove(['btn-success','btn-warning']);
-    requestCtrlBtn.classList.add('btn-primary');
     requestCtrlBtn.disabled = false;
+    requestCtrlBtn.innerText = "Request Control";
+    requestCtrlBtn.classList.remove(...['btn-success', 'btn-warning']);
+    requestCtrlBtn.classList.add('btn-primary');
     messageCtrl.innerText = '';
     messageCtrl.classList.add('d-none');
+
+    if (destroyController != null) {
+        destroyController();
+        destroyController = null;
+    }
 });
 
 controlHubConnection.on("ControlRemaining", function (seconds) {
@@ -72,83 +69,139 @@ controlHubConnection.on("ControlRemaining", function (seconds) {
 });
 
 
+function createRenderer(canvsDOMId) {
+    // Load a Renderer
+    let renderer = new THREE.WebGLRenderer({ alpha: false, antialias: true });
+    renderer.setClearColor(0xC5C5C3);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(250, 250);
+    document.getElementById(canvsDOMId).appendChild(renderer.domElement);
+
+    return renderer;
+}
+
+function createScene() {
+    // Load 3D Scene
+    let scene = new THREE.Scene();
+
+    // Load Light
+    var ambientLight = new THREE.AmbientLight(0xcccccc);
+    scene.add(ambientLight);
+
+    var directionalLight = new THREE.DirectionalLight(0xffffff);
+    directionalLight.position.set(0, 0, 1).normalize();
+    scene.add(directionalLight);
+
+    return scene;
+}
+
+function createCamera(cameraZPosition = 10) {
+
+    // Load Camera Perspektive
+    let camera = new THREE.PerspectiveCamera(50, 250 / 250, 1, 200);
+    camera.position.z = 5;
+
+    // Load the Orbitcontroller
+    return camera;
+}
+
+function createCube() {
+    const geometry = new THREE.BoxGeometry(2, 2, 2).toNonIndexed();;
+
+    const positionAttribute = geometry.getAttribute('position');
+    const colors = [];
+    const color = new THREE.Color();
+
+    for (let i = 0; i < positionAttribute.count; i += 3) {
+
+        if (i >= 0 && i <= 9) {
+            color.set(0xffff00); // x facing yellow
+        }
+        else if (i >= 10 && i <= 21) {
+            color.set(0xff0000); // y facing red
+        }
+        else {
+            color.set(0x0000ff); // z facing blue
+        }
+
+        // define the same color for each vertex of a triangle
+
+        colors.push(color.r, color.g, color.b);
+        colors.push(color.r, color.g, color.b);
+        colors.push(color.r, color.g, color.b);
+
+    }
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    const material = new THREE.MeshBasicMaterial({ vertexColors: true });
+    let cube = new THREE.Mesh(geometry, material);
+
+    // wireframe
+    var geo = new THREE.EdgesGeometry(cube.geometry); // or WireframeGeometry
+    var mat = new THREE.LineBasicMaterial({ color: 0xffffff });
+    var wireframe = new THREE.LineSegments(geo, mat);
+    cube.add(wireframe);
+
+    return cube;
+}
 
 
-let scene, camera, renderer, boxModel;
+
 // Define variables
 const boxRotationSpeed = 0.01; // You can adjust the rotation speed
 
-// Load 3D Scene
-scene = new THREE.Scene();
+const receiverRenderer = createRenderer('receiver-wrapper');
+const receiverScene = createScene();
+const receiverCamera = createCamera();
+const receiverCube = createCube();
+receiverScene.add(receiverCube);
 
-// Load Camera Perspektive
-camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 1, 200);
-camera.position.set(0, 0, 0);
-
-// Load a Renderer
-renderer = new THREE.WebGLRenderer({ alpha: false });
-renderer.setClearColor(0xC5C5C3);
-renderer.setPixelRatio(window.devicePixelRatio);
-renderer.setSize(300, 200);
-document.getElementById("receiver-wrapper").appendChild(renderer.domElement);
-
-// Load the Orbitcontroller
-// var controls = new OrbitControls(camera, renderer.domElement);
-
-// Load Light
-var ambientLight = new THREE.AmbientLight(0xcccccc);
-scene.add(ambientLight);
-
-var directionalLight = new THREE.DirectionalLight(0xffffff);
-directionalLight.position.set(0, 1, 1).normalize();
-scene.add(directionalLight);
-// Load the phone model (you'll need to have a 3D model file)
-const loader = new GLTFLoader();
-loader.load('https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Box/glTF/Box.gltf', function (gltf) {
-    boxModel = gltf.scene;
-    gltf.scene.scale.set(2, 2, 2);
-    gltf.scene.position.x = 0;				    //Position (x = right+ left-) 
-    gltf.scene.position.y = 0;				    //Position (y = up+, down-)
-    gltf.scene.position.z = 0;				    //Position (z = front +, back-)
-    scene.add(boxModel);
-});
-
-// Handle device orientation events
-function handleOrientation(event) {
-    const alpha = event.alpha;
-    const beta = event.beta;
-    const gamma = event.gamma;
-
-    if (boxModel) {
-        // Apply rotation based on the device's gyroscope data
-        boxModel.rotation.x = beta * (Math.PI / 180);
-        boxModel.rotation.y = gamma * (Math.PI / 180);
-        boxModel.rotation.z = alpha * (Math.PI / 180);
-    }
-}
-
-// Add an event listener for device orientation
-window.addEventListener('deviceorientation', handleOrientation);
-
-// Position the camera
-camera.position.z = 5;
-
-// Create an animation loop to continuously render the scene
+let receiverControls = new OrbitControls(receiverCamera, receiverRenderer.domElement);
+receiverControls.enabled = false;
 function animate() {
     requestAnimationFrame(animate);
-
-    // if (boxModel) {
-    //     // Rotate the phone model continuously
-    //     boxModel.rotation.x += boxRotationSpeed;
-    //     boxModel.rotation.y += boxRotationSpeed;
-    // }
-
-    renderer.render(scene, camera);
+    receiverControls.update();
+    receiverRenderer.render(receiverScene, receiverCamera);
 }
-
 animate();
 
 
+controlHubConnection.on("ReceiveData", function (cameraData) {
+    receiverCamera.position.x = cameraData.x;
+    receiverCamera.position.y = cameraData.y;
+    receiverCamera.position.z = cameraData.z;
+});
+
+
+function createController() {
+    const controllerRenderer = createRenderer('controller-wrapper');
+    const controllerScene = createScene();
+    const controllerCamera = createCamera();
+    const controllerCube = createCube();
+    controllerScene.add(controllerCube);
+
+    let controls = new OrbitControls(controllerCamera, controllerRenderer.domElement);
+    function onPositionChange(o) {
+        controlHubConnection.invoke("SendData", controllerCamera.position).catch(function (err) {
+            return console.error(err.toString());
+        });
+    }
+    controls.addEventListener('change', onPositionChange);
+
+    let request;
+    function controllerAnimate() {
+        request = requestAnimationFrame(controllerAnimate);
+        controls.update();
+        controllerRenderer.render(controllerScene, controllerCamera);
+    }
+
+    controllerAnimate();
+
+    return function () {
+        document.getElementById('controller-wrapper').innerHTML = '';
+        cancelAnimationFrame(request);
+        controls.removeEventListener('change', onPositionChange);
+    }
+}
 
 
 
@@ -156,24 +209,47 @@ animate();
 
 
 
+// Handle device orientation events
+//function handleDeviceOrientation(event) {
+//    const alpha = event.alpha;
+//    const beta = event.beta;
+//    const gamma = event.gamma;
+
+//    if (cube) {
+//        // Apply rotation based on the device's gyroscope data
+//        cube.rotation.x = beta * (Math.PI / 180);
+//        cube.rotation.y = gamma * (Math.PI / 180);
+//        cube.rotation.z = alpha * (Math.PI / 180);
+//    }
+//    document.getElementById('xyz').innerHTML = `alpha:${alpha}<br> beta:${beta}<br>gamma:${gamma}<br> cube.rotation.z:${cube.rotation.z}<br> cube.rotation.x:${cube.rotation.x}<br> cube.rotation.y:${cube.rotation.x} `
+//}
+
+//function handleDeviceMotion(event) {
+//    if (cube) {
+//        // Apply rotation based on the device's gyroscope data
+//        cube.rotation.x = Math.round(event.accelerationIncludingGravity.x * 5) / 25;
+//        cube.rotation.y = Math.round(event.accelerationIncludingGravity.y * 5) / 25;
+//        cube.rotation.z = Math.round(event.accelerationIncludingGravity.z * 5) / 5;
+//    }
+//    document.getElementById('xyz').innerHTML = `alpha:${alpha}<br> beta:${beta}<br>gamma:${gamma}<br> cube.rotation.z:${cube.rotation.z}<br> cube.rotation.x:${cube.rotation.x}<br> cube.rotation.y:${cube.rotation.x} `
+//}
+
+//var throttledHandling = _.throttle(handleDeviceMotion, 100);
 
 
+// Add an event listener for device orientation
+//window.addEventListener('deviceorientation', throttledHandling);
+//window.addEventListener('devicemotion', throttledHandling);
+
+
+// Create an animation loop to continuously render the scene
 
 
 
 
 
 // Handle receiving sensor data and moving the 3D object
-controlHubConnection.on("ReceiveSensorData", function (sensorData) {
-    // Extract data (e.g., beta) from the sensor data received
-    const beta = sensorData.beta;
 
-    // Update the position of the 3D object based on the sensor data
-    cube.rotation.x = beta * (Math.PI / 180);
-
-    // Render the updated scene
-    renderer.render(scene, camera);
-});
 
 // Start the SignalR connection
 controlHubConnection.start().then(function () {
