@@ -7,8 +7,8 @@ public class ControlHub : Hub
 {
     private static Queue<ControlRequest> controlQueue = new Queue<ControlRequest>();
     private static ControlRequest? currentControl;
-    private ControlTimer controlTimer;
-    private const int CONTROL_TIME = 120; //seconds
+    private ControlTimer? controlTimer;
+    private const int CONTROL_TIME = 60; //seconds
 
     public async Task RequestControl()
     {
@@ -20,23 +20,26 @@ public class ControlHub : Hub
 
         // Add the control request to the queue
         controlQueue.Enqueue(controlRequest);
+
         // Add timer to dictionary for request
         controlTimer = new ControlTimer(500)
         {
             hubContext = Context,
             hubCallerClients = Clients
         };
-        ControlTimer.ControlTimers.GetOrAdd(controlRequest.ConnectionId, controlTimer);
+        controlTimer = ControlTimer.ControlTimers.GetOrAdd(controlRequest.ConnectionId, controlTimer);
 
         // Grant control if the queue is empty or it's the first request
         if (controlQueue.Count == 1 || controlQueue.Peek() == controlRequest)
         {
             currentControl = controlRequest;
 
-            SetupTimerForRelease();
+            SetupTimerForRelease(controlRequest);
 
             await Clients.Client(controlRequest.ConnectionId).SendAsync("ControlGranted");
-        }else{
+        }
+        else
+        {
             await Clients.Client(controlRequest.ConnectionId).SendAsync("ControlQueued");
         }
     }
@@ -46,16 +49,17 @@ public class ControlHub : Hub
         _ = AutoReleaseControl(source, e);
     }
 
-    public void SetupTimerForRelease()
+    public void SetupTimerForRelease(ControlRequest controlRequest)
     {
-        if(controlTimer == null)
+        if (controlRequest != null && controlTimer == null)
         {
-            controlTimer = ControlTimer.ControlTimers.GetOrAdd(currentControl.ConnectionId, new ControlTimer(500));
+            controlTimer = ControlTimer.ControlTimers.GetOrAdd(controlRequest.ConnectionId, controlTimer);
         }
         controlTimer.Elapsed += new ElapsedEventHandler(ReleaseControlMiddleware);
         controlTimer.Enabled = true;
     }
-
+    
+    // Check elapsed seconds and release control
     public async Task AutoReleaseControl(object source, ElapsedEventArgs e)
     {
         var controlTimer = (ControlTimer)source;
@@ -64,45 +68,40 @@ public class ControlHub : Hub
 
         if (currentControl != null)//&& currentControl.ConnectionId == Context.ConnectionId)
         {
-            var elapsedSeconds = DateTime.Now.Subtract(currentControl.RequestTime).Seconds;
+            var elapsedSeconds = Math.Ceiling(DateTime.Now.Subtract(currentControl.RequestTime).TotalSeconds);
             await hubClients.Client(currentControl.ConnectionId).SendAsync("ControlRemaining", CONTROL_TIME - elapsedSeconds);
             if (elapsedSeconds >= CONTROL_TIME)
             {
-                await hubClients.Client(hcallerContext.ConnectionId).SendAsync("ControlReleased");
-                await controlTimer.hubCallerClients.All.SendAsync("ReceiveData", new CameraData());
-                // Release control
-                currentControl = null;
-                // Clear the timer when control is explicitly released
-                ClearControlTimer(hcallerContext.ConnectionId);
-
-                // Remove the first request from the queue
-                if (controlQueue.Count > 0)
-                    controlQueue.Dequeue();
-
-                // Grant control to the next in the queue
-                if (controlQueue.Count > 0)
-                {
-                    currentControl = controlQueue.Peek();
-                    currentControl.RequestTime = DateTime.Now;
-                    SetupTimerForRelease();
-                    await hubClients.Client(currentControl.ConnectionId).SendAsync("ControlGranted", currentControl.RequestTime.ToString());
-                }
+                await ClearTimerAndControl(hubClients, hcallerContext);
             }
         }
     }
     public async Task ReleaseControl()
     {
-
-        if (currentControl != null && currentControl.ConnectionId == Context.ConnectionId)
+        try
         {
-            controlTimer = ControlTimer.ControlTimers.GetOrAdd(Context.ConnectionId, controlTimer);
+            if (currentControl != null && currentControl.ConnectionId == Context.ConnectionId)
+            {
+                await ClearTimerAndControl(Clients, Context);
+            }
+        }
+        catch (Exception ex)
+        {
+            await Clients.All.SendAsync(ex.ToString());
+        }
+    }
 
-            await Clients.Client(Context.ConnectionId).SendAsync("ControlReleased");
-            await Clients.All.SendAsync("ReceiveData", new CameraData());
+    private async Task ClearTimerAndControl(IHubCallerClients hubClients, HubCallerContext context)
+    {
+        try
+        {
+            // Clear the timer when control is explicitly released
+            ClearControlTimer(context.ConnectionId);
+
+            await hubClients.Client(context.ConnectionId).SendAsync("ControlReleased");
+            await hubClients.All.SendAsync("ReceiveData", new CameraData());
             // Release control
             currentControl = null;
-            // Clear the timer when control is explicitly released
-            ClearControlTimer(Context.ConnectionId);
 
             // Remove the first request from the queue
             if (controlQueue.Count > 0)
@@ -113,28 +112,31 @@ public class ControlHub : Hub
             {
                 currentControl = controlQueue.Peek();
                 currentControl.RequestTime = DateTime.Now;
-                SetupTimerForRelease();
-                await Clients.Client(currentControl.ConnectionId).SendAsync("ControlGranted", currentControl.RequestTime.ToString());
+                SetupTimerForRelease(currentControl);
+                await hubClients.Client(currentControl.ConnectionId).SendAsync("ControlGranted", currentControl.RequestTime.ToString());
             }
+        }
+        catch (Exception ex)
+        {
+            await Clients.All.SendAsync(ex.ToString());
         }
     }
 
     private void ClearControlTimer(string connectionId)
     {
-        controlTimer = ControlTimer.ControlTimers.GetOrAdd(connectionId, controlTimer);
+        controlTimer = ControlTimer.ControlTimers.GetOrAdd(connectionId, new ControlTimer(500));
         if (controlTimer != null)
         {
             controlTimer.Elapsed -= new ElapsedEventHandler(ReleaseControlMiddleware);
             controlTimer.Enabled = false;
-            controlTimer.Dispose();
             controlTimer = null;
         }
     }
 
     public async Task SendData(CameraData cameraData)
     {
-        controlTimer = ControlTimer.ControlTimers.GetOrAdd(Context.ConnectionId, controlTimer);
-        if (controlTimer != null && controlTimer.hubContext!= null && Context.ConnectionId == controlTimer.hubContext.ConnectionId)
+        controlTimer = ControlTimer.ControlTimers.GetOrAdd(Context.ConnectionId, new ControlTimer(500));
+        if (controlTimer != null && controlTimer.hubContext != null && Context.ConnectionId == controlTimer.hubContext.ConnectionId)
         {
             // Broadcast the received sensor data to all clients
             await controlTimer.hubCallerClients.All.SendAsync("ReceiveData", cameraData);
